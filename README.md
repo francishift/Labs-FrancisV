@@ -74,8 +74,8 @@ graph TD
 
 1. **Clonar el repositorio**
    ```bash
-   git clone git@github.com:francishift/Labs-Backend-FrancisV.git
-   cd Labs-Backend-FrancisV
+   git clone git@github.com:francishift/Labs-FrancisV.git
+   cd Labs-FrancisV
    ```
 
 2. **Instalar dependencias**
