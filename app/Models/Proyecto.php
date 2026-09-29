@@ -1,0 +1,238 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use App\Traits\HandlesExtensionSnapshots;
+use App\Models\Configuracion;
+use App\Models\Software;
+
+class Proyecto extends Model
+{
+    use HasFactory, HandlesExtensionSnapshots;
+
+    protected static function booted()
+    {
+        static::saved(function ($model) {
+            \Illuminate\Support\Facades\Cache::forget('admin_dashboard_stats');
+            
+            // Si cambia el estado entre En proceso y Finalizado, recálculo de sus extensiones para los demás
+            if ($model->wasChanged('estado')) {
+                $extensionIds = $model->extensiones()->pluck('extensiones.id')->toArray();
+                if (!empty($extensionIds)) {
+                    app(\App\Services\ExtensionPricingService::class)->recalculateForMultiple($extensionIds);
+                }
+            }
+        });
+
+        static::deleting(function ($model) {
+            // Guardamos los IDs temporalmente para poder recalcular *después* de que se borre de la DB en cascada
+            $model->temporal_extension_ids = $model->extensiones()->pluck('extensiones.id')->toArray();
+        });
+
+        static::deleted(function ($model) {
+            \Illuminate\Support\Facades\Cache::forget('admin_dashboard_stats');
+
+            if (!empty($model->temporal_extension_ids)) {
+                app(\App\Services\ExtensionPricingService::class)->recalculateForMultiple($model->temporal_extension_ids);
+            }
+        });
+    }
+
+    protected $fillable = [
+        'proyecto',
+        'descripcion',
+        'fecha_inicio',
+        'fecha_fin',
+        'presupuesto',
+        'estado',
+        'client_id',
+        'precio_hora',
+        'porcentaje_software',
+        'coste_software_anual',
+        'presupuesto_id',
+    ];
+
+    protected $casts = [
+        'fecha_inicio' => 'date:Y-m-d',
+        'fecha_fin' => 'date:Y-m-d',
+        'presupuesto' => 'decimal:2',
+    ];
+
+    public function client()
+    {
+        return $this->belongsTo(Client::class);
+    }
+
+    public function presupuestoAsociado()
+    {
+        return $this->belongsTo(Presupuesto::class, 'presupuesto_id');
+    }
+
+    public function servicios()
+    {
+        return $this->hasMany(Servicio::class);
+    }
+
+    public function facturas()
+    {
+        return $this->hasMany(Factura::class);
+    }
+
+    /**
+     * Scope para proyectos en proceso.
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('estado', 'En proceso');
+    }
+
+    /**
+     * Scope para proyectos finalizados en el año actual.
+     */
+    public function scopeFinishedThisYear($query, $year = null)
+    {
+        $year = $year ?: date('Y');
+        return $query->where('estado', 'Finalizado')
+            ->whereYear('fecha_fin', $year);
+    }
+
+
+    /**
+     * Datos para el gráfico de proyectos activos.
+     */
+    public static function getActiveDataForChart()
+    {
+        return self::where('estado', 'En proceso')
+            ->select('proyecto', 'presupuesto')
+            ->get()
+            ->map(fn($p) => [
+                'name' => $p->proyecto,
+                'value' => (float) $p->presupuesto
+            ]);
+    }
+
+    /**
+     * Estadísticas de proyectos finalizados para el dashboard.
+     */
+    public static function getFinishedStats($year)
+    {
+        $query = self::where('estado', 'Finalizado')
+            ->where(function ($q) use ($year) {
+                $q->whereYear('fecha_fin', $year)
+                    ->orWhere(function ($sub) use ($year) {
+                        $sub->whereNull('fecha_fin')->whereYear('updated_at', $year);
+                    });
+            });
+
+        return [
+            'count' => $query->count(),
+            'presupuesto' => $query->sum('presupuesto')
+        ];
+    }
+
+    /**
+     * Estadísticas de proyectos activos.
+     */
+    public static function getActiveStats()
+    {
+        return [
+            'count' => self::where('estado', 'En proceso')->count(),
+            'presupuesto' => self::where('estado', 'En proceso')->sum('presupuesto')
+        ];
+    }
+
+    /**
+     * Obtiene estadísticas agregadas detalladas de todos los proyectos activos.
+     */
+    public static function getAggregatedStatsForYear($year = null)
+    {
+        $year = $year ?: date('Y');
+        $proyectos = self::active()
+            ->orWhere(fn($q) => $q->finishedThisYear($year))
+            ->with(['extensiones', 'servicios'])
+            ->get();
+        
+        $totalPresupuesto = $proyectos->sum('presupuesto');
+        $totalExtensiones = 0;
+        $totalSoftware = 0;
+        $totalServicios = 0;
+        $totalMinutos = 0;
+
+        foreach ($proyectos as $proyecto) {
+            // Extensiones
+            foreach ($proyecto->extensiones as $ext) {
+                $totalExtensiones += (float) ($ext->pivot->precio_aplicado ?? $ext->precio);
+            }
+
+            // Software (Snapshot or Current)
+            $softAnual = (float) ($proyecto->coste_software_anual ?? Software::getTotalAnual());
+            $porcentaje = (float) ($proyecto->porcentaje_software ?? Configuracion::get('porcentaje_software', 2));
+            $totalSoftware += ($softAnual * $porcentaje) / 100;
+
+            // Servicios
+            foreach ($proyecto->servicios as $servicio) {
+                $totalMinutos += $servicio->duracion_minutos;
+                $totalServicios += ($servicio->duracion_minutos / 60) * ($proyecto->precio_hora ?: 0);
+            }
+        }
+
+        return [
+            'total_presupuesto' => $totalPresupuesto,
+            'total_fijo' => $totalExtensiones + $totalSoftware,
+            'total_software' => $totalSoftware,
+            'total_extensiones' => $totalExtensiones,
+            'total_servicios' => $totalServicios,
+            'total_minutos' => $totalMinutos,
+            'total_gastos' => $totalExtensiones + $totalSoftware + $totalServicios,
+        ];
+    }
+
+    /**
+     * Obtiene los datos financieros detallados del proyecto.
+     */
+    public function getFinancialStats()
+    {
+        $totalMinutes = 0;
+        $hoursCostTotal = 0;
+        $fixedCostTotal = 0;
+
+        foreach ($this->servicios as $s) {
+            $totalMinutes += $s->duracion_minutos;
+            $precioHora = $s->precio_hora ?? \App\Models\Configuracion::get('precio_hora', 0);
+            $hoursCostTotal += ($s->duracion_minutos / 60) * $precioHora;
+            $fixedCostTotal += (float) ($s->precio ?? 0);
+        }
+
+        $servicesTotal = $hoursCostTotal + $fixedCostTotal;
+
+        $extensionsTotal = $this->extensiones->reduce(function ($acc, $e) {
+            return $acc + (float)($e->pivot->precio_aplicado ?? $e->precio ?? 0);
+        }, 0);
+
+        $totalSoftwareAnual = $this->coste_software_anual ?? Software::getTotalAnual();
+        $porcentajeSoftware = (float)($this->porcentaje_software ?? \App\Models\Configuracion::get('porcentaje_software', 2));
+        $costeSoftware = ($totalSoftwareAnual * $porcentajeSoftware) / 100;
+
+        $grandTotal = $servicesTotal + $extensionsTotal + $costeSoftware;
+
+        $h = floor($totalMinutes / 60);
+        $m = $totalMinutes % 60;
+        $formattedTime = $m > 0 ? "{$h}h {$m}min" : "{$h}h";
+
+        return [
+            'totalMinutes' => $totalMinutes,
+            'formattedTime' => $formattedTime,
+            'hoursCostTotal' => $hoursCostTotal,
+            'fixedCostTotal' => $fixedCostTotal,
+            'hasFixedCost' => $fixedCostTotal > 0,
+            'servicesTotal' => $servicesTotal,
+            'extensionsTotal' => $extensionsTotal,
+            'costeSoftware' => $costeSoftware,
+            'grandTotal' => $grandTotal,
+            'totalFacturado' => $this->facturas->sum('total'),
+            'totalFacturadoNeto' => $this->facturas->sum('subtotal'),
+        ];
+    }
+}
