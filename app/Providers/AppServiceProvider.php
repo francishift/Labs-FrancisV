@@ -22,6 +22,12 @@ class AppServiceProvider extends ServiceProvider
     {
         \Illuminate\Database\Eloquent\Model::preventLazyLoading(! app()->isProduction());
 
+        // Compartir la instancia de Message con todas las plantillas y componentes de correo (para $message->embed)
+        \Illuminate\Support\Facades\View::composer(['mail::*', 'emails.*', 'vendor.mail.*'], function ($view) {
+            if (isset($view->getData()['message'])) {
+                \Illuminate\Support\Facades\View::share('message', $view->getData()['message']);
+            }
+        });
 
         // Ignorar los E_USER_NOTICE del paquete de minishlink/web-push sobre GMP y BCMath
         set_error_handler(function ($severity, $message, $file, $line) {
