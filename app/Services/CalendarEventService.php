@@ -41,6 +41,7 @@ class CalendarEventService
                     'google_event_id' => $evento->google_event_id,
                     'recurring_event_id' => $masterId,
                     'is_external' => false,
+                    'meet_link' => $this->extraerEnlaceVideollamadaTexto($evento->description),
                 ]
             ];
 
@@ -72,9 +73,25 @@ class CalendarEventService
             $resultadosGoogle = $this->googleApiService->listEvents($opcionesGoogle);
             
             foreach ($resultadosGoogle->getItems() as $eventoGoogle) {
-                if (!in_array($eventoGoogle->getId(), $idsGoogleIgnorar)) {
-                    $inicioItem = clone ($eventoGoogle->getStart()->getDateTime() ? Carbon::parse($eventoGoogle->getStart()->getDateTime()) : Carbon::parse($eventoGoogle->getStart()->getDate()));
-                    $finItem = clone ($eventoGoogle->getEnd()->getDateTime() ? Carbon::parse($eventoGoogle->getEnd()->getDateTime()) : Carbon::parse($eventoGoogle->getEnd()->getDate()));
+                $meetLinkGoogle = $this->extraerEnlaceVideollamadaGoogle($eventoGoogle);
+
+                if (in_array($eventoGoogle->getId(), $idsGoogleIgnorar)) {
+                    // Si ya estaba en el array de eventos locales, enriquecerlo con el enlace de videollamada si no lo tenía
+                    if ($meetLinkGoogle) {
+                        foreach ($arrayEventos as &$evt) {
+                            if (isset($evt['extendedProps']['google_event_id']) && $evt['extendedProps']['google_event_id'] === $eventoGoogle->getId()) {
+                                if (empty($evt['extendedProps']['meet_link'])) {
+                                    $evt['extendedProps']['meet_link'] = $meetLinkGoogle;
+                                }
+                                break;
+                            }
+                        }
+                        unset($evt);
+                    }
+                    continue;
+                }
+                $inicioItem = clone ($eventoGoogle->getStart()->getDateTime() ? Carbon::parse($eventoGoogle->getStart()->getDateTime()) : Carbon::parse($eventoGoogle->getStart()->getDate()));
+                $finItem = clone ($eventoGoogle->getEnd()->getDateTime() ? Carbon::parse($eventoGoogle->getEnd()->getDateTime()) : Carbon::parse($eventoGoogle->getEnd()->getDate()));
                     
                     $masterId = $eventoGoogle->getRecurringEventId();
                     if (!$masterId && preg_match('/_([0-9]{8})(T[0-9]{6}Z)?$/', $eventoGoogle->getId())) {
@@ -116,11 +133,12 @@ class CalendarEventService
                             'end' => $finItem->toIso8601String(),
                             'allDay' => $isAllDay,
                             'extendedProps' => [
-                                'description' => $eventoLocalRelacionado->description,
+                                'description' => $eventoLocalRelacionado->description ?: $eventoGoogle->getDescription(),
                                 'reminders' => $listaRecordatorios,
                                 'google_event_id' => $eventoGoogle->getId(),
                                 'recurring_event_id' => $masterId,
                                 'is_external' => false,
+                                'meet_link' => $this->extraerEnlaceVideollamadaGoogle($eventoGoogle),
                             ]
                         ];
 
@@ -147,10 +165,10 @@ class CalendarEventService
                                 'google_event_id' => $eventoGoogle->getId(),
                                 'recurring_event_id' => $masterId,
                                 'is_external' => true,
+                                'meet_link' => $this->extraerEnlaceVideollamadaGoogle($eventoGoogle),
                             ]
                         ];
                     }
-                }
             }
         } catch (Exception $e) {
             Log::error("Error leyendo Google Calendar: " . $e->getMessage());
@@ -423,5 +441,52 @@ class CalendarEventService
         $parametros->setUseDefault(false);
         $parametros->setOverrides([]);
         return $parametros;
+    }
+
+    /**
+     * Extrae el enlace de videollamada (Google Meet, Zoom, Teams) de un objeto evento de Google.
+     */
+    private function extraerEnlaceVideollamadaGoogle(GoogleServiceEvent $eventoGoogle): ?string
+    {
+        if ($eventoGoogle->getHangoutLink()) {
+            return $eventoGoogle->getHangoutLink();
+        }
+
+        $conferenceData = $eventoGoogle->getConferenceData();
+        if ($conferenceData && $conferenceData->getEntryPoints()) {
+            foreach ($conferenceData->getEntryPoints() as $entryPoint) {
+                if ($entryPoint->getEntryPointType() === 'video' && $entryPoint->getUri()) {
+                    return $entryPoint->getUri();
+                }
+            }
+        }
+
+        return $this->extraerEnlaceVideollamadaTexto(
+            ($eventoGoogle->getLocation() ?? '') . ' ' . ($eventoGoogle->getDescription() ?? '')
+        );
+    }
+
+    /**
+     * Extrae un enlace de videollamada a partir de un texto plano (Google Meet, Zoom, Teams).
+     */
+    private function extraerEnlaceVideollamadaTexto(?string $texto): ?string
+    {
+        if (empty($texto)) {
+            return null;
+        }
+
+        if (preg_match('/https:\/\/meet\.google\.com\/[a-z0-9-]+/i', $texto, $matches)) {
+            return $matches[0];
+        }
+
+        if (preg_match('/https:\/\/[a-z0-9.]*zoom\.us\/j\/[0-9?=&-_]+/i', $texto, $matches)) {
+            return $matches[0];
+        }
+
+        if (preg_match('/https:\/\/teams\.microsoft\.com\/l\/meetup-join\/[^\s"\'<>]+/i', $texto, $matches)) {
+            return $matches[0];
+        }
+
+        return null;
     }
 }

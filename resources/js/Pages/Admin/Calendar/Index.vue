@@ -34,6 +34,8 @@ const defaultEventData = {
     is_recurring: false,
     recurrence: '',
     is_all_day: false,
+    meet_link: null,
+    is_external: false,
 };
 
 const selectedEventData = ref({ ...defaultEventData });
@@ -92,12 +94,16 @@ const calendarOptions = ref({
     eventContent: function(arg) {
         let title = arg.event.title;
         let timeText = arg.timeText;
+        let hasMeet = !!arg.event.extendedProps?.meet_link;
         
         return {
             html: `<div class="flex flex-col h-full overflow-hidden leading-tight py-0.5">
-                       <span class="font-semibold text-[11px] md:text-xs text-emerald-800 dark:text-emerald-200 truncate shrink-0" title="${title}">
-                           ${title}
-                       </span>
+                       <div class="flex items-center gap-1 overflow-hidden shrink-0">
+                           ${hasMeet ? `<svg class="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>` : ''}
+                           <span class="font-semibold text-[11px] md:text-xs text-emerald-800 dark:text-emerald-200 truncate" title="${title}">
+                               ${title}
+                           </span>
+                       </div>
                        ${timeText ? `
                        <span class="text-[9px] md:text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5 font-medium truncate">
                            ${timeText}
@@ -196,6 +202,8 @@ function handleEventClick(clickInfo) {
         is_recurring: false,
         recurrence: '',
         is_all_day: event.allDay || false,
+        meet_link: event.extendedProps.meet_link || null,
+        is_external: event.extendedProps.is_external || false,
     };
     
     isEditing.value = true;

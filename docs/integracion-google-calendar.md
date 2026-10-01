@@ -32,7 +32,22 @@ La Base de Datos MySQL se erige como la absoluta **Fuente de la Verdad** de las 
 *   Si una instancia detectada en Google pertenece a una Serie Raíz de la base de datos local que tenía programada información de alertas o recordatorios, la herramienta hereda y clona esa alarma específicamente para el día venidero en la base de datos interna.
 *   De esta manera el minuto a minuto interno dispara los Avisos PWA y Correos sin ensuciar los repositorios Cloud nativos de terceros y respetando las Ventanas de Intervención (2 horas preventivas) en caso de edición en diferido.
 
-## 4. Autenticación / Credenciales (Spatie)
+## 5. Integración con Videollamadas (Google Meet, Zoom y Teams)
+
+El sistema detecta automáticamente si un evento contiene una reunión virtual o videollamada y lo integra en la experiencia de usuario:
+
+### Backend (`CalendarEventService`)
+- **Extracción multicanal**: Se extrae el enlace de videollamada priorizando la propiedad nativa de Google Calendar `hangoutLink` o `conferenceData`. Si el evento no cuenta con videollamada nativa de Google pero incluye enlaces a Google Meet, Zoom o Microsoft Teams en su descripción o ubicación, el servicio los extrae mediante expresiones regulares.
+- **Enriquecimiento en tiempo real**: Durante la obtención de eventos combinados (`obtenerEventosCombinados`), los eventos locales se enriquecen con el enlace de videollamada obtenido de Google Calendar, viajando hacia el frontend dentro de `extendedProps.meet_link`.
+
+### Frontend (`Index.vue` y `EventFormModal.vue`)
+- **Indicador en lienzo**: En la cuadrícula visual de FullCalendar, los eventos que disponen de videollamada muestran un icono distintivo de videocámara junto al título.
+- **Banner interactivo en Modal**: Al abrir el evento para consultar o editar, se despliega una tarjeta destacada con:
+  - Información de la reunión y URL formateada.
+  - Botón **"Unirse a la llamada"** que abre Google Meet directamente en una pestaña nueva con `target="_blank"` y atributos de seguridad `rel="noopener noreferrer"`.
+  - Botón **"Copiar enlace"** para copiar la URL al portapapeles con confirmación visual interactiva.
+
+## 6. Autenticación / Credenciales (Spatie)
 
 Para mantener desacoplada la interfaz local de la dependencia directa en la cuenta (sin requerir autorización OAuth visual), este método recomienda altamente el uso de **Credenciales por cuenta de servicio (Service Account)**.
 

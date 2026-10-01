@@ -14,7 +14,11 @@ import ConfirmModal from '@/Components/ConfirmModal.vue';
 import { 
     CalendarDaysIcon, 
     ExclamationTriangleIcon, 
-    TrashIcon 
+    TrashIcon,
+    VideoCameraIcon,
+    ArrowTopRightOnSquareIcon,
+    ClipboardDocumentIcon,
+    CheckIcon
 } from '@heroicons/vue/24/outline';
 import axios from 'axios';
 
@@ -41,7 +45,20 @@ const form = ref({
     is_recurring: false,
     recurrence: '',
     is_all_day: false,
+    meet_link: null,
+    is_external: false,
 });
+
+const copiedMeet = ref(false);
+
+function copyMeetLink() {
+    if (!form.value.meet_link) return;
+    navigator.clipboard.writeText(form.value.meet_link);
+    copiedMeet.value = true;
+    setTimeout(() => {
+        copiedMeet.value = false;
+    }, 2000);
+}
 
 const formErrors = ref({});
 const isLoading = ref(false);
@@ -164,6 +181,50 @@ async function confirmDeleteEvent() {
                 <CalendarDaysIcon class="h-6 w-6 mr-2 text-emerald-500" />
                 {{ isEditing ? 'Editar Evento' : 'Nuevo Evento' }}
             </h3>
+
+            <!-- Banner destacado Google Meet / Videollamada -->
+            <div v-if="form.meet_link" class="mb-6 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/5 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-zinc-900 border border-emerald-300/70 dark:border-emerald-700/60 rounded-xl p-4 shadow-sm">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-emerald-600 dark:bg-emerald-500 flex items-center justify-center text-white shadow-sm shrink-0">
+                            <VideoCameraIcon class="w-5 h-5" />
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h4 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Reunión de Google Meet</h4>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                                    Enlace activo
+                                </span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-zinc-400 mt-0.5 truncate max-w-[200px] sm:max-w-xs font-mono">
+                                {{ form.meet_link }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3.5 pt-3 border-t border-emerald-200/50 dark:border-emerald-800/40 flex items-center gap-2">
+                    <a 
+                        :href="form.meet_link" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors duration-150"
+                    >
+                        <span>Unirse a la llamada</span>
+                        <ArrowTopRightOnSquareIcon class="w-3.5 h-3.5" />
+                    </a>
+                    
+                    <button
+                        type="button"
+                        @click="copyMeetLink"
+                        class="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 text-xs font-medium rounded-lg shadow-sm transition-colors duration-150"
+                    >
+                        <CheckIcon v-if="copiedMeet" class="w-3.5 h-3.5 text-emerald-500" />
+                        <ClipboardDocumentIcon v-else class="w-3.5 h-3.5 text-gray-400" />
+                        <span>{{ copiedMeet ? '¡Copiado!' : 'Copiar enlace' }}</span>
+                    </button>
+                </div>
+            </div>
 
             <div v-if="form.recurring_event_id && isEditing" class="mb-6 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700/50 rounded-lg p-4">
                 <div class="flex">
